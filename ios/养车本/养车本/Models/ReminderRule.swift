@@ -84,7 +84,7 @@ final class ReminderRule {
                 let remainingDays = Calendar.current.dateComponents([.day], from: Date(), to: dueDate).day ?? 0
                 if remainingDays < 0 {
                     isOverdue = true
-                } else if remainingDays < 7 {
+                } else if remainingDays < 3 {
                     isApproaching = true
                 }
             }
