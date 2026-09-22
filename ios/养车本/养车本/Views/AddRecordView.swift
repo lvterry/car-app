@@ -161,9 +161,6 @@ struct AddRecordView: View {
     }
     
     private func processImageWithOCR(_ image: UIImage) {
-        guard let appSettings = settings.first,
-              appSettings.ocrMode != .disabled else { return }
-        
         isProcessingOCR = true
         
         Task {

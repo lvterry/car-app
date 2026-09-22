@@ -30,10 +30,33 @@ struct HomeView: View {
             .first
     }
     
+    var shouldShowOdometerPrompt: Bool {
+        guard let appSettings = settings.first, !appSettings.hasDismissedOdometerPrompt else {
+            return false
+        }
+        
+        guard let reminder = nextReminder,
+              reminder.mode == .mileage || reminder.mode == .earlier else {
+            return false
+        }
+        
+        let daysSinceUpdate = Calendar.current.dateComponents(
+            [.day],
+            from: vehicle.odometerUpdatedAt,
+            to: Date()
+        ).day ?? 0
+        
+        return daysSinceUpdate >= 7
+    }
+    
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
+                    if shouldShowOdometerPrompt {
+                        odometerPromptBanner
+                    }
+                    
                     nextTodoCard
                     
                     if !vehicleRecords.isEmpty {
@@ -117,6 +140,41 @@ struct HomeView: View {
         records.filter { $0.vehicle?.id == vehicle.id }
     }
     
+    private var odometerPromptBanner: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("该更新一下当前里程了吗？")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Text("上次更新：\(vehicle.odometerUpdatedAt.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            Button {
+                showingOdometerEdit = true
+            } label: {
+                Text("更新")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+            
+            Button {
+                dismissOdometerPrompt()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding()
+        .background(Color.orange.opacity(0.15))
+        .cornerRadius(12)
+    }
+    
     private var nextTodoCard: some View {
         Group {
             if let reminder = nextReminder {
@@ -182,6 +240,12 @@ struct HomeView: View {
         
         try? modelContext.save()
         newOdometer = ""
+    }
+    
+    private func dismissOdometerPrompt() {
+        guard let appSettings = settings.first else { return }
+        appSettings.hasDismissedOdometerPrompt = true
+        try? modelContext.save()
     }
 }
 

@@ -144,7 +144,105 @@ class BackupService {
         }
     }
     
-    func restoreBackup(from zipURL: URL, modelContext: ModelContext) async -> Bool {
-        return false
+    func restoreBackup(from backupURL: URL, modelContext: ModelContext) async -> Bool {
+        do {
+            let jsonURL = backupURL.appendingPathComponent("backup.json")
+            let jsonData = try Data(contentsOf: jsonURL)
+            
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            
+            let backupData = try decoder.decode(BackupData.self, from: jsonData)
+            
+            let allVehicles = try modelContext.fetch(FetchDescriptor<Vehicle>())
+            for vehicle in allVehicles {
+                modelContext.delete(vehicle)
+            }
+            
+            let allRecords = try modelContext.fetch(FetchDescriptor<Record>())
+            for record in allRecords {
+                modelContext.delete(record)
+            }
+            
+            let allReminders = try modelContext.fetch(FetchDescriptor<ReminderRule>())
+            for reminder in allReminders {
+                modelContext.delete(reminder)
+            }
+            
+            let vehicle = Vehicle(
+                id: backupData.vehicle.id,
+                name: backupData.vehicle.name,
+                makeModel: backupData.vehicle.makeModel,
+                powertrain: Powertrain(rawValue: backupData.vehicle.powertrain) ?? .fuel,
+                odometerKm: backupData.vehicle.odometerKm,
+                odometerUpdatedAt: backupData.vehicle.odometerUpdatedAt
+            )
+            modelContext.insert(vehicle)
+            
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let receiptsPath = documentsPath.appendingPathComponent("Receipts", isDirectory: true)
+            try? FileManager.default.createDirectory(at: receiptsPath, withIntermediateDirectories: true)
+            
+            let existingReceipts = try? FileManager.default.contentsOfDirectory(atPath: receiptsPath.path)
+            existingReceipts?.forEach { filename in
+                try? FileManager.default.removeItem(at: receiptsPath.appendingPathComponent(filename))
+            }
+            
+            let backupReceiptsPath = backupURL.appendingPathComponent("receipts")
+            if FileManager.default.fileExists(atPath: backupReceiptsPath.path) {
+                let receiptFiles = try? FileManager.default.contentsOfDirectory(atPath: backupReceiptsPath.path)
+                receiptFiles?.forEach { filename in
+                    let sourceURL = backupReceiptsPath.appendingPathComponent(filename)
+                    let destURL = receiptsPath.appendingPathComponent(filename)
+                    try? FileManager.default.copyItem(at: sourceURL, to: destURL)
+                }
+            }
+            
+            for recordBackup in backupData.records {
+                let record = Record(
+                    id: recordBackup.id,
+                    vehicle: vehicle,
+                    type: RecordType(rawValue: recordBackup.type) ?? .other,
+                    title: recordBackup.title,
+                    date: recordBackup.date,
+                    odometerKm: recordBackup.odometerKm,
+                    amountCents: recordBackup.amountCents,
+                    notes: recordBackup.notes,
+                    receiptImagePath: recordBackup.receiptImagePath,
+                    ocrRawText: recordBackup.ocrRawText,
+                    kWh: recordBackup.kWh,
+                    locationKind: recordBackup.locationKind
+                )
+                modelContext.insert(record)
+            }
+            
+            for reminderBackup in backupData.reminders {
+                let reminder = ReminderRule(
+                    id: reminderBackup.id,
+                    vehicle: vehicle,
+                    title: reminderBackup.title,
+                    intervalKm: reminderBackup.intervalKm,
+                    intervalMonths: reminderBackup.intervalMonths,
+                    mode: ReminderMode(rawValue: reminderBackup.mode) ?? .earlier,
+                    nextDueKm: reminderBackup.nextDueKm,
+                    nextDueDate: reminderBackup.nextDueDate,
+                    notifyEnabled: reminderBackup.notifyEnabled,
+                    createdAt: reminderBackup.createdAt,
+                    lastCompletedAt: reminderBackup.lastCompletedAt,
+                    lastCompletedOdometerKm: reminderBackup.lastCompletedOdometerKm
+                )
+                modelContext.insert(reminder)
+            }
+            
+            try modelContext.save()
+            
+            let reminderService = ReminderService()
+            reminderService.scheduleNotifications(for: vehicle, modelContext: modelContext)
+            
+            return true
+        } catch {
+            print("Restore error: \(error)")
+            return false
+        }
     }
 }

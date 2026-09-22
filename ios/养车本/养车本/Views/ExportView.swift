@@ -11,9 +11,13 @@ struct ExportView: View {
     @State private var showingPDFPreview = false
     @State private var showingShareSheet = false
     @State private var showingBackupShare = false
+    @State private var showingRestorePicker = false
+    @State private var showingRestoreConfirm = false
     @State private var generatedPDF: URL?
     @State private var generatedBackup: URL?
+    @State private var selectedRestoreURL: URL?
     @State private var isGenerating = false
+    @State private var isRestoring = false
     
     var body: some View {
         List {
@@ -64,6 +68,7 @@ struct ExportView: View {
                 .disabled(isGenerating)
                 
                 Button {
+                    showingRestorePicker = true
                 } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
@@ -78,6 +83,7 @@ struct ExportView: View {
                             .foregroundColor(.accentColor)
                     }
                 }
+                .disabled(isGenerating || isRestoring)
             } header: {
                 Text("备份包")
             } footer: {
@@ -102,8 +108,30 @@ struct ExportView: View {
                 ShareSheet(items: [backupURL])
             }
         }
+        .fileImporter(
+            isPresented: $showingRestorePicker,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                selectedRestoreURL = url
+                showingRestoreConfirm = true
+            }
+        }
+        .alert("确认恢复备份", isPresented: $showingRestoreConfirm) {
+            Button("取消", role: .cancel) {
+                selectedRestoreURL = nil
+            }
+            Button("确认恢复", role: .destructive) {
+                if let url = selectedRestoreURL {
+                    restoreBackup(from: url)
+                }
+            }
+        } message: {
+            Text("恢复备份将会替换所有当前数据（车辆、记录、提醒）。此操作不可撤销。确定要继续吗？")
+        }
         .overlay {
-            if isGenerating {
+            if isGenerating || isRestoring {
                 ZStack {
                     Color.black.opacity(0.3)
                         .ignoresSafeArea()
@@ -111,7 +139,7 @@ struct ExportView: View {
                     VStack(spacing: 16) {
                         ProgressView()
                             .scaleEffect(1.5)
-                        Text("正在生成…")
+                        Text(isRestoring ? "正在恢复…" : "正在生成…")
                             .font(.headline)
                             .foregroundColor(.white)
                     }
@@ -181,6 +209,22 @@ struct ExportView: View {
         )
         
         return (try? modelContext.fetch(descriptor)) ?? []
+    }
+    
+    private func restoreBackup(from url: URL) {
+        isRestoring = true
+        selectedRestoreURL = nil
+        
+        Task {
+            let backupService = BackupService()
+            let success = await backupService.restoreBackup(from: url, modelContext: modelContext)
+            
+            await MainActor.run {
+                isRestoring = false
+                if success {
+                }
+            }
+        }
     }
 }
 
